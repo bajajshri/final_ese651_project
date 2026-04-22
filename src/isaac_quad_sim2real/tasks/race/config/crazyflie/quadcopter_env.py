@@ -274,7 +274,7 @@ class QuadcopterEnv(DirectRLEnv):
         self._crashed = torch.zeros(self.num_envs, device=self.device, dtype=torch.int)
 
         # Motor dynamics
-        self.cfg.thrust_to_weight = 3.15
+        self.cfg.thrust_to_weight = 2.9 #3.15
         r = self.cfg.arm_length * np.sqrt(2.0) / 2.0
         self._rotor_positions = torch.tensor(
             [
@@ -431,6 +431,10 @@ class QuadcopterEnv(DirectRLEnv):
                 [-2.0, 3.50, 0.75, 0.0, 0.0,  1.57],
             ]
         }
+
+        print(f"Loading track: {self.cfg.track_name}")  # ADD THIS LINE
+        print(f"Track has {len(tracks[self.cfg.track_name])} gates")  # ADD THIS LINE
+
 
         self._waypoints = torch.tensor(tracks[self.cfg.track_name], device=self.device)
 

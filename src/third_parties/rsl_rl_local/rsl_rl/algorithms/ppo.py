@@ -147,7 +147,61 @@ class PPO:
             _,  # rnd_state_batch - not used anymore
         ) in generator:
             # TODO ----- START -----
-            # Implement the PPO update step
+            self.actor_critic.act(observations)
+            current_log_probs = self.actor_critic.get_actions_log_prob(sampled_actions)
+            current_mean = self.actor_critic.action_mean
+            current_std = self.actor_critic.action_std
+            policy_entropy = self.actor_critic.entropy
+            #critic
+            current_values = self.actor_critic.evaluate(critic_observations)
+            #value loss
+            # Value function loss
+            if self.use_clipped_value_loss:
+                value_clipped = value_targets + (current_values - value_targets).clamp(
+                    -self.clip_param, self.clip_param
+                )
+                value_losses = (current_values - discounted_returns).pow(2)
+                value_losses_clipped = (value_clipped - discounted_returns).pow(2)
+                value_loss = torch.max(value_losses, value_losses_clipped).mean()
+            else:
+                value_loss = (discounted_returns - current_values).pow(2).mean()
+            #adaptive KL penalty    
+            if self.desired_kl is not None and self.schedule == "adaptive":
+                with torch.inference_mode():
+                    kl = torch.sum(
+                        torch.log(current_std / prev_action_stds + 1.0e-5)
+                        + (torch.square(prev_action_stds) + torch.square(prev_mean_actions - current_mean))
+                        / (2.0 * torch.square(current_std))
+                        - 0.5,
+                        axis=-1,
+                    )
+                    kl_mean = torch.mean(kl)
+
+                    if kl_mean > self.desired_kl * 2.0:
+                        self.learning_rate = max(1e-5, self.learning_rate / 1.5)
+                    elif kl_mean < self.desired_kl / 2.0 and kl_mean > 0.0:
+                        self.learning_rate = min(1e-2, self.learning_rate * 1.5)
+
+                    for param_group in self.optimizer.param_groups:
+                        param_group["lr"] = self.learning_rate
+            
+            #Surrogate Loss
+            ratio = torch.exp(current_log_probs - torch.squeeze(prev_log_probs))
+            surrogate = -torch.squeeze(advantage_estimates) * ratio
+            surrogate_clipped = -torch.squeeze(advantage_estimates) * torch.clamp(
+                ratio, 1.0 - self.clip_param, 1.0 + self.clip_param
+            )
+            surrogate_loss = torch.max(surrogate, surrogate_clipped).mean()
+            #Gradient step
+            loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * policy_entropy.mean()  
+            self.optimizer.zero_grad()
+            loss.backward()
+            #nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.max_grad_norm)
+            self.optimizer.step()
+            # Logging
+            mean_value_loss += value_loss.item()
+            mean_surrogate_loss += surrogate_loss.item()
+            mean_entropy += policy_entropy.mean().item()
             # TODO ----- END -----
 
         num_updates = self.num_learning_epochs * self.num_mini_batches

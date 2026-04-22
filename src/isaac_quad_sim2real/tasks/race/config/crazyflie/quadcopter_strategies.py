@@ -35,10 +35,10 @@ class DefaultQuadcopterStrategy:
         self.cfg = env.cfg
         #last actions buffer for reward calculation
         self._last_actions = torch.zeros(self.num_envs, 4, device=self.device)
-        self._last_distance_to_gate = torch.ones(self.num_envs, device=self.device) * 10.0
-        self._last_distance_x_to_gate = torch.ones(self.num_envs, device=self.device) * 10.0
-        self._last_distance_x_to_prev_gate = torch.ones(self.num_envs, device=self.device) * 10.0
-        self._last_distance_to_desired = torch.ones(self.num_envs, device=self.device) * 10.0
+        self._last_distance_to_gate = torch.ones(self.num_envs, device=self.device) * 6.0
+        self._last_distance_x_to_gate = torch.ones(self.num_envs, device=self.device) * 6.0
+        self._last_distance_x_to_prev_gate = torch.ones(self.num_envs, device=self.device) * 6.0
+        self._last_distance_to_desired = torch.ones(self.num_envs, device=self.device) * 6.0
         self.offset_penalty = torch.ones(self.num_envs, device=self.device)
         self._prev_gate_idx = torch.zeros(self.num_envs, device=self.device, dtype=self.env._idx_wp.dtype)
         self._prev_gate_reversed = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
@@ -93,16 +93,16 @@ class DefaultQuadcopterStrategy:
             (torch.abs(self.env._pose_drone_wrt_gate[:, 1]) < 0.4) & (torch.abs(self.env._pose_drone_wrt_gate[:, 2]) < 0.4))
         # gate reversed reward 
         gate_reversed = ((dist_x_to_gate >= 0.0) & (self._last_distance_x_to_gate < 0.0) & 
-            (torch.abs(self.env._pose_drone_wrt_gate[:, 1]) < 0.4) & (torch.abs(self.env._pose_drone_wrt_gate[:, 2]) < 0.4))
+            (torch.abs(self.env._pose_drone_wrt_gate[:, 1]) < 2.0) & (torch.abs(self.env._pose_drone_wrt_gate[:, 2]) < 0.7))
 
         # Gate frame distance (for normal approach)
         dist_gate_frame = torch.abs(self.env._pose_drone_wrt_gate[:, 0])
 
         dist_to_desired =  dist_gate_frame
 
-        delta_dist_to_desired = dist_to_desired - self._last_distance_to_desired
+        delta_dist_to_desired = dist_to_desired - self._last_distance_x_to_gate
         progress = -delta_dist_to_desired
-        self._last_distance_to_desired = dist_to_desired.clone()
+        self._last_distance_x_to_gate = dist_to_desired.clone()
 
         #------switch to the next waypoint if gate passed-----
         ids_gate_passed = torch.where(gate_passed)[0]
@@ -111,14 +111,13 @@ class DefaultQuadcopterStrategy:
         
         # set desired positions in the world frame
         self.env._desired_pos_w[ids_gate_passed, :3] = self.env._waypoints[self.env._idx_wp[ids_gate_passed], :3]
-        #self.env._desired_pos_w[ids_gate_passed, 2] = self.env._waypoints[self.env._idx_wp[ids_gate_passed], 2]
         
         # Store current gate as previous for NEXT timestep
         self._prev_gate_idx = current_gate_idx
 
-        gate_dir_gate_frame = -self.env._pose_drone_wrt_gate[:, :3]
-        gate_dir_norm = torch.nn.functional.normalize(gate_dir_gate_frame, dim=1)
-        alignment = gate_dir_norm[:, 0].clamp(-1.0, 1.0)
+        #gate_dir_gate_frame = -self.env._pose_drone_wrt_gate[:, :3]
+        #gate_dir_norm = torch.nn.functional.normalize(gate_dir_gate_frame, dim=1)
+        #alignment = gate_dir_norm[:, 0].clamp(-1.0, 1.0)
 
         ang_vel_b = self.env._robot.data.root_ang_vel_b                  
         ang_rate_penalty = torch.linalg.norm(ang_vel_b, dim=1)
@@ -132,9 +131,8 @@ class DefaultQuadcopterStrategy:
             )
             # Newly assigned gate — drone is on correct side so use gate frame
             self._last_distance_x_to_gate[ids_gate_passed] = new_pose[:, 0]
-            self._last_distance_to_desired[ids_gate_passed] = torch.abs(new_pose[:, 0])
             progress[ids_gate_passed] = 0.0
-        
+            self._prev_gate_idx[ids_gate_passed] = current_gate_idx[ids_gate_passed]
         # Compute drone position relative to PREVIOUS gate
         
         prev_gate_pos_w = self.env._waypoints[actual_prev_gate_idx, :3]
@@ -146,10 +144,10 @@ class DefaultQuadcopterStrategy:
 
         # distance to previous gate
         dist_x_to_prev_gate = drone_pos_wrt_prev_gate[:, 0]
-        prev_gate_reversed = ((dist_x_to_prev_gate >= 0.0) & (self._last_distance_x_to_prev_gate < 0.0) & 
-               (torch.abs(drone_pos_wrt_prev_gate[:, 1]) < 0.4) & (torch.abs(drone_pos_wrt_prev_gate[:, 2]) < 0.4))
-        self._last_distance_x_to_prev_gate = dist_x_to_prev_gate.clone()
-        self.env._prev_gate_reversed = prev_gate_reversed
+        #prev_gate_reversed = ((dist_x_to_prev_gate >= 0.0) & (self._last_distance_x_to_prev_gate < 0.0) & 
+        #       (torch.abs(drone_pos_wrt_prev_gate[:, 1]) < 1.0) & (torch.abs(drone_pos_wrt_prev_gate[:, 2]) < 0.6))
+        #self._last_distance_x_to_prev_gate = dist_x_to_prev_gate.clone()
+        #self.env._prev_gate_reversed = prev_gate_reversed
 
         # add cost for action change to encourage smoother control (optional)
         control_smoothness_cost = torch.linalg.norm(self.env._actions - self._last_actions, dim=1)
@@ -169,8 +167,7 @@ class DefaultQuadcopterStrategy:
                 "progress_goal": progress * self.env.rew['progress_goal_reward_scale'],
                 "gate_passed": gate_passed.float() * self.env.rew['gate_passed_reward_scale'],
                 "gate_reversed": gate_reversed.float() * self.env.rew['gate_reversed_reward_scale'],
-                "prev_gate_reversed": prev_gate_reversed.float() * self.env.rew['prev_gate_reversed_reward_scale'],
-                "alignment":alignment * self.env.rew['alignment_reward_scale'],
+                #"prev_gate_reversed": prev_gate_reversed.float() * self.env.rew['prev_gate_reversed_reward_scale'],
                 "ang_rate":ang_rate_penalty * self.env.rew['ang_rate_reward_scale'],
                 "control": control_cost * self.env.rew['control_reward_scale'],
                 "control_smoothness": control_smoothness_cost * self.env.rew['control_smoothness_reward_scale'],
@@ -318,7 +315,7 @@ class DefaultQuadcopterStrategy:
         theta = self.env._waypoints[waypoint_indices][:, -1]
         z_wp = self.env._waypoints[waypoint_indices][:, 2]
 
-        x_local = torch.empty(n_reset, device=self.device).uniform_(-2.0, -0.5)
+        x_local = torch.empty(n_reset, device=self.device).uniform_(-3.0, 0.7)
         y_local = torch.empty(n_reset, device=self.device).uniform_(-1.0, 1.0)
         z_local = torch.zeros(n_reset, device=self.device)
 
@@ -361,7 +358,7 @@ class DefaultQuadcopterStrategy:
             y_rot = sin_theta * x_local + cos_theta * y_local
             x0 = x0_wp - x_rot
             y0 = y0_wp - y_rot
-            z0 = 0.05
+            z0 =  torch.empty(1, device=self.device).uniform_(0.05, 2.0)
 
             # point drone towards the zeroth gate
             yaw0 = torch.atan2(y0_wp - y0, x0_wp - x0)

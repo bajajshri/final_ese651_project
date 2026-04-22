@@ -109,9 +109,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # reward scales
     progress_goal_reward_scale = 0.0
     gate_passed_reward_scale = 50.0
-    gate_reversed_reward_scale = -80.0
-    prev_gate_reversed_reward_scale = -80.0
-    alignment_reward_scale = 0.0
+    gate_reversed_reward_scale = -800.0
+    prev_gate_reversed_reward_scale = -800.0
     ang_rate_cost = -0.001
     control_smoothness_reward_scale = -.0008
     control_cost = -0.001
