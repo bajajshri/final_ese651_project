@@ -274,7 +274,7 @@ class QuadcopterEnv(DirectRLEnv):
         self._crashed = torch.zeros(self.num_envs, device=self.device, dtype=torch.int)
 
         # Motor dynamics
-        self.cfg.thrust_to_weight = 2.9 #3.15
+        self.cfg.thrust_to_weight = 2.95 #3.15
         r = self.cfg.arm_length * np.sqrt(2.0) / 2.0
         self._rotor_positions = torch.tensor(
             [
@@ -344,6 +344,9 @@ class QuadcopterEnv(DirectRLEnv):
         self._n_run = 0
 
         self.set_debug_vis(self.cfg.debug_vis)
+
+        self._gate_reversed = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+        self._prev_gate_reversed = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
 
     def update_iteration(self, iter):
         self.iteration = iter
@@ -686,6 +689,8 @@ class QuadcopterEnv(DirectRLEnv):
             cond_max_h
           | cond_h_min_time
           | cond_crashed
+          | self._gate_reversed
+          | self._prev_gate_reversed
         )
 
         # timeout conditions
